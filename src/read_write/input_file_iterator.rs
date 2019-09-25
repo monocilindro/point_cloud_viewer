@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::read_write::{PlyIterator, PtsIterator};
-use crate::Point;
+use crate::PointsBatch;
 use pbr::ProgressBar;
 use std::io::Stdout;
 use std::path::PathBuf;
@@ -30,7 +30,7 @@ pub enum InputFileIterator {
 }
 
 impl Iterator for InputFileIterator {
-    type Item = Point;
+    type Item = PointsBatch;
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         match *self {
@@ -39,22 +39,24 @@ impl Iterator for InputFileIterator {
         }
     }
 
-    fn next(&mut self) -> Option<Point> {
+    fn next(&mut self) -> Option<PointsBatch> {
         match self {
-            // TODO(feuerste): Remove once all iterators work on PointsBatch
-            InputFileIterator::Ply(p) => p.next().map(Point::from),
+            InputFileIterator::Ply(p) => p.next(),
             InputFileIterator::Pts(p) => p.next(),
         }
     }
 }
 
 pub fn make_stream(input: &InputFile) -> (InputFileIterator, Option<ProgressBar<Stdout>>) {
+    // TODO(feuerste): Adjust batch size once all iterators work on PointsBatch
+    let batch_size = 100_000;
     let stream = match *input {
         InputFile::Ply(ref filename) => {
-            // TODO(feuerste): Adjust batch size once all iterators work on PointsBatch
-            InputFileIterator::Ply(PlyIterator::from_file(filename, 1).unwrap())
+            InputFileIterator::Ply(PlyIterator::from_file(filename, batch_size).unwrap())
         }
-        InputFile::Pts(ref filename) => InputFileIterator::Pts(PtsIterator::from_file(filename)),
+        InputFile::Pts(ref filename) => {
+            InputFileIterator::Pts(PtsIterator::from_file(filename, batch_size))
+        }
     };
 
     let progress_bar = match stream.size_hint() {

@@ -1,7 +1,7 @@
 use crate::errors::*;
 use crate::math::PointCulling;
 use crate::math::{AllPoints, Frustum, Isometry3, Obb, OrientedBeam};
-use crate::read_write::{Encoding, PointIterator};
+use crate::read_write::{BatchIterator, Encoding};
 use crate::{AttributeData, Point, PointsBatch};
 use cgmath::{Matrix4, Point3, Vector3};
 use collision::Aabb3;
@@ -45,17 +45,36 @@ impl PointQuery {
 /// Essentially a specialized version of the Filter iterator adapter
 pub struct FilteredIterator {
     pub culling: Box<dyn PointCulling<f64>>,
-    pub point_iterator: PointIterator,
+    pub batch_iterator: BatchIterator,
 }
 
 impl Iterator for FilteredIterator {
-    type Item = Point;
+    type Item = PointsBatch;
 
-    fn next(&mut self) -> Option<Point> {
+    fn next(&mut self) -> Option<PointsBatch> {
         let culling = &self.culling;
-        self.point_iterator.find(|pt| {
-            let pos = <Point3<f64> as cgmath::EuclideanSpace>::from_vec(pt.position);
-            culling.contains(&pos)
+        self.batch_iterator.next().map(|mut batch| {
+            let retain: Vec<bool> = batch
+                .position
+                .iter()
+                .map(|pos| {
+                    culling.contains(&<Point3<f64> as cgmath::EuclideanSpace>::from_vec(*pos))
+                })
+                .collect();
+            let mut retain = retain.into_iter().cycle();
+            batch.position.retain(|_| retain.next().unwrap());
+            for a in batch.attributes.values_mut() {
+                match a {
+                    AttributeData::U8(data) => data.retain(|_| retain.next().unwrap()),
+                    AttributeData::U64(data) => data.retain(|_| retain.next().unwrap()),
+                    AttributeData::I64(data) => data.retain(|_| retain.next().unwrap()),
+                    AttributeData::F32(data) => data.retain(|_| retain.next().unwrap()),
+                    AttributeData::F64(data) => data.retain(|_| retain.next().unwrap()),
+                    AttributeData::U8Vec3(data) => data.retain(|_| retain.next().unwrap()),
+                    AttributeData::F64Vec3(data) => data.retain(|_| retain.next().unwrap()),
+                };
+            }
+            batch
         })
     }
 }
@@ -65,9 +84,7 @@ struct PointStream<'a, F>
 where
     F: Fn(PointsBatch) -> Result<()>,
 {
-    position: Vec<Vector3<f64>>,
-    color: Vec<Vector3<u8>>,
-    intensity: Vec<f32>,
+    tmp: PointsBatch,
     local_from_global: &'a Option<Isometry3<f64>>,
     func: &'a F,
 }
@@ -82,9 +99,10 @@ where
         func: &'a F,
     ) -> Self {
         PointStream {
-            position: Vec::with_capacity(num_points_per_batch),
-            color: Vec::with_capacity(num_points_per_batch),
-            intensity: Vec::with_capacity(num_points_per_batch),
+            tmp: PointsBatch {
+                position: Vec::new(),
+                attributes: BTreeMap::new(),
+            },
             local_from_global,
             func,
         }
@@ -131,12 +149,12 @@ where
         (self.func)(points_batch)
     }
 
-    fn push_points_and_callback<I>(&mut self, point_iterator: I) -> Result<()>
+    fn push_points_and_callback<I>(&mut self, batch_iterator: I) -> Result<()>
     where
-        I: Iterator<Item = Point>,
+        I: Iterator<Item = PointsBatch>,
     {
-        for point in point_iterator {
-            self.push_point(point);
+        for batch in batch_iterator {
+            self.push_batch(point);
             if self.position.len() == self.position.capacity() {
                 self.callback()?;
             }
@@ -148,10 +166,15 @@ where
 // TODO(nnmm): Move this somewhere else
 pub trait PointCloud: Sync {
     type Id: ToString + Send + Copy;
-    type PointsIter: Iterator<Item = Point>;
+    type PointsIter: Iterator<Item = PointsBatch>;
     fn nodes_in_location(&self, query: &PointQuery) -> Vec<Self::Id>;
     fn encoding_for_node(&self, id: Self::Id) -> Encoding;
-    fn points_in_node(&self, query: &PointQuery, node_id: Self::Id) -> Result<Self::PointsIter>;
+    fn points_in_node(
+        &self,
+        query: &PointQuery,
+        node_id: Self::Id,
+        batch_size: usize,
+    ) -> Result<Self::PointsIter>;
 }
 
 /// Iterator on point batches
@@ -238,11 +261,11 @@ where
                             .and_then(Steal::success)
                     }) {
                         // TODO(nnmm): This crashes on error. We should bubble up an error.
-                        let point_iterator = octree
-                            .points_in_node(&point_location, node_id)
+                        let batch_iterator = octree
+                            .points_in_node(&point_location, node_id, batch_size)
                             .expect("Could not read node points");
                         // executing on the available next task if the function still requires it
-                        match point_stream.push_points_and_callback(point_iterator) {
+                        match point_stream.push_points_and_callback(batch_iterator) {
                             Ok(_) => continue,
                             Err(ref e) => {
                                 match e.kind() {

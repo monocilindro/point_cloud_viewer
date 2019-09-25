@@ -270,69 +270,57 @@ pub struct PointsBatch {
 }
 
 impl PointsBatch {
+    fn append_attribute<'a, T: 'a>(
+        &'a mut self,
+        name: &str,
+        other: &mut PointsBatch,
+    ) -> std::result::Result<(), String>
+    where
+        &'a mut Vec<T>: TryFrom<&'a mut AttributeData, Error = String>,
+        Vec<T>: TryFrom<AttributeData, Error = String>,
+    {
+        let self_vec: &'a mut Vec<T> = self.get_attribute_vec_mut(name)?;
+        let mut other_vec: Vec<T> = other.remove_attribute_vec(name)?;
+        self_vec.append(&mut other_vec);
+        Ok(())
+    }
+
     pub fn append(&mut self, other: &mut PointsBatch) -> std::result::Result<(), String> {
-        if self.position.is_empty() {
-            *self = other.split_off(0);
-        } else {
-            assert_eq!(self.attributes.len(), other.attributes.len());
-            self.position.append(&mut other.position);
-            let data_types: Vec<(String, AttributeDataType)> = self
-                .attributes
-                .iter()
-                .map(|(name, attrib)| (name.clone(), attrib.data_type()))
-                .collect();
-            for (name, dtype) in &data_types {
-                use AttributeDataType::*;
-                match dtype {
-                    U8 => append_attribute::<u8>(name, self, other)?,
-                    U64 => append_attribute::<u64>(name, self, other)?,
-                    I64 => append_attribute::<i64>(name, self, other)?,
-                    F32 => append_attribute::<f32>(name, self, other)?,
-                    F64 => append_attribute::<f64>(name, self, other)?,
-                    U8Vec3 => append_attribute::<Vector3<u8>>(name, self, other)?,
-                    F64Vec3 => append_attribute::<Vector3<f64>>(name, self, other)?,
-                };
-            }
+        self.position.append(&mut other.position);
+        let data_types: Vec<(String, AttributeDataType)> = self
+            .attributes
+            .iter()
+            .map(|(name, attrib)| (name.clone(), attrib.data_type()))
+            .collect();
+        for (name, dtype) in &data_types {
+            match dtype {
+                AttributeDataType::U8 => self.append_attribute::<u8>(name, other)?,
+                AttributeDataType::U64 => self.append_attribute::<u64>(name, other)?,
+                AttributeDataType::I64 => self.append_attribute::<i64>(name, other)?,
+                AttributeDataType::F32 => self.append_attribute::<f32>(name, other)?,
+                AttributeDataType::F64 => self.append_attribute::<f64>(name, other)?,
+                AttributeDataType::U8Vec3 => self.append_attribute::<Vector3<u8>>(name, other)?,
+                AttributeDataType::F64Vec3 => self.append_attribute::<Vector3<f64>>(name, other)?,
+            };
         }
         Ok(())
     }
 
-    pub fn split_off(&mut self, at: usize) -> Self {
-        let mut res = Self {
+    pub fn split_off(&mut self, at: usize) -> std::result::Result<Self, String> {
+        let res = Self {
             position: self.position.split_off(at),
             attributes: BTreeMap::new(),
         };
-        for (name, attribute) in self.attributes.iter_mut() {
-            let name = name.clone();
-            use AttributeData::*;
-            match attribute {
-                U8(data) => res.attributes.insert(name, U8(data.split_off(at))),
-                U64(data) => res.attributes.insert(name, U64(data.split_off(at))),
-                I64(data) => res.attributes.insert(name, I64(data.split_off(at))),
-                F32(data) => res.attributes.insert(name, F32(data.split_off(at))),
-                F64(data) => res.attributes.insert(name, F64(data.split_off(at))),
-                U8Vec3(data) => res.attributes.insert(name, U8Vec3(data.split_off(at))),
-                F64Vec3(data) => res.attributes.insert(name, F64Vec3(data.split_off(at))),
-            };
-        }
-        res
-    }
-
-    pub fn retain(&mut self, keep: &[bool]) {
-        assert_eq!(self.position.len(), keep.len());
-        let mut keep = keep.iter().copied().cycle();
-        self.position.retain(|_| keep.next().unwrap());
-        for a in self.attributes.values_mut() {
-            match a {
-                AttributeData::U8(data) => data.retain(|_| keep.next().unwrap()),
-                AttributeData::U64(data) => data.retain(|_| keep.next().unwrap()),
-                AttributeData::I64(data) => data.retain(|_| keep.next().unwrap()),
-                AttributeData::F32(data) => data.retain(|_| keep.next().unwrap()),
-                AttributeData::F64(data) => data.retain(|_| keep.next().unwrap()),
-                AttributeData::U8Vec3(data) => data.retain(|_| keep.next().unwrap()),
-                AttributeData::F64Vec3(data) => data.retain(|_| keep.next().unwrap()),
+        for (name, attrib) in self.attributes.iter_mut() {
+            match attrib {
+                AttributeData::U8(data) => {
+                    res.attributes
+                        .insert(name.clone(), AttributeData::U8(data.split_off(at)));
+                }
+                
             }
         }
+        Ok(res)
     }
 
     pub fn get_attribute_vec<'a, T>(
