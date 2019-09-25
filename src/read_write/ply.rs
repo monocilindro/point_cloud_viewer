@@ -279,6 +279,19 @@ macro_rules! read_casted_property {
     };
 }
 
+macro_rules! push_reader {
+    ($readers:ident, $prop:expr, &mut $num_bytes:ident, $dtype:ty) => {{
+        $readers.push(read_casted_property!(
+            $prop,
+            |p: &mut PointsBatch, name: &str, val| {
+                let vec: &mut Vec<$dtype> = p.get_attribute_vec_mut(name).unwrap();
+                vec.push(val)
+            },
+            &mut $num_bytes
+        ));
+    }};
+}
+
 // Similar to 'create_and_return_reading_fn', but creates a function that just advances the read
 // pointer.
 macro_rules! create_skip_fn {
@@ -402,56 +415,11 @@ impl PlyIterator {
                 _ => {
                     use self::DataType::*;
                     match prop.data_type {
-                        Uint8 => {
-                            readers.push(read_casted_property!(
-                                prop,
-                                |p: &mut PointsBatch, name: &str, val| {
-                                    let vec: &mut Vec<u8> = p.get_attribute_vec_mut(name).unwrap();
-                                    vec.push(val)
-                                },
-                                &mut num_bytes_per_point
-                            ));
-                        }
-                        Uint64 => {
-                            readers.push(read_casted_property!(
-                                prop,
-                                |p: &mut PointsBatch, name: &str, val| {
-                                    let vec: &mut Vec<u64> = p.get_attribute_vec_mut(name).unwrap();
-                                    vec.push(val)
-                                },
-                                &mut num_bytes_per_point
-                            ));
-                        }
-                        Int64 => {
-                            readers.push(read_casted_property!(
-                                prop,
-                                |p: &mut PointsBatch, name: &str, val| {
-                                    let vec: &mut Vec<i64> = p.get_attribute_vec_mut(name).unwrap();
-                                    vec.push(val)
-                                },
-                                &mut num_bytes_per_point
-                            ));
-                        }
-                        Float32 => {
-                            readers.push(read_casted_property!(
-                                prop,
-                                |p: &mut PointsBatch, name: &str, val| {
-                                    let vec: &mut Vec<f32> = p.get_attribute_vec_mut(name).unwrap();
-                                    vec.push(val)
-                                },
-                                &mut num_bytes_per_point
-                            ));
-                        }
-                        Float64 => {
-                            readers.push(read_casted_property!(
-                                prop,
-                                |p: &mut PointsBatch, name: &str, val| {
-                                    let vec: &mut Vec<f64> = p.get_attribute_vec_mut(name).unwrap();
-                                    vec.push(val)
-                                },
-                                &mut num_bytes_per_point
-                            ));
-                        }
+                        Uint8 => push_reader!(readers, prop, &mut num_bytes_per_point, u8),
+                        Uint64 => push_reader!(readers, prop, &mut num_bytes_per_point, u64),
+                        Int64 => push_reader!(readers, prop, &mut num_bytes_per_point, i64),
+                        Float32 => push_reader!(readers, prop, &mut num_bytes_per_point, f32),
+                        Float64 => push_reader!(readers, prop, &mut num_bytes_per_point, f64),
                         Int8 => readers.push(create_skip_fn!(prop, &mut num_bytes_per_point, 1)),
                         Uint16 | Int16 => {
                             readers.push(create_skip_fn!(prop, &mut num_bytes_per_point, 2))
