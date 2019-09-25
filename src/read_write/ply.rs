@@ -450,18 +450,19 @@ impl PlyIterator {
     }
 }
 
-fn batch_from_readers(readers: &[PropertyReader]) -> PointsBatch {
+fn batch_from_readers(readers: &[PropertyReader], batch_size: usize) -> PointsBatch {
     let mut batch = PointsBatch {
-        position: Vec::new(),
+        position: Vec::with_capacity(batch_size),
         attributes: BTreeMap::new(),
     };
     for reader in readers {
         match &reader.prop.name as &str {
             "x" | "y" | "z" => {}
             "r" | "red" => {
-                batch
-                    .attributes
-                    .insert("color".to_string(), AttributeData::U8Vec3(Vec::new()));
+                batch.attributes.insert(
+                    "color".to_string(),
+                    AttributeData::U8Vec3(Vec::with_capacity(batch_size)),
+                );
             }
             "g" | "green" | "b" | "blue" | "a" | "alpha" => {}
             other => {
@@ -472,11 +473,11 @@ fn batch_from_readers(readers: &[PropertyReader]) -> PointsBatch {
                     other
                 };
                 let data = match reader.prop.data_type {
-                    DataType::Uint8 => AttributeData::U8(Vec::new()),
-                    DataType::Uint64 => AttributeData::U64(Vec::new()),
-                    DataType::Int64 => AttributeData::I64(Vec::new()),
-                    DataType::Float32 => AttributeData::F32(Vec::new()),
-                    DataType::Float64 => AttributeData::F64(Vec::new()),
+                    DataType::Uint8 => AttributeData::U8(Vec::with_capacity(batch_size)),
+                    DataType::Uint64 => AttributeData::U64(Vec::with_capacity(batch_size)),
+                    DataType::Int64 => AttributeData::I64(Vec::with_capacity(batch_size)),
+                    DataType::Float32 => AttributeData::F32(Vec::with_capacity(batch_size)),
+                    DataType::Float64 => AttributeData::F64(Vec::with_capacity(batch_size)),
                     DataType::Int8
                     | DataType::Uint16
                     | DataType::Int16
@@ -520,7 +521,7 @@ impl Iterator for PlyIterator {
             return None;
         }
 
-        let mut batch = batch_from_readers(&self.readers);
+        let mut batch = batch_from_readers(&self.readers, self.batch_size);
 
         while self.point_count < self.num_total_points as usize
             && batch.position.len() < self.batch_size
