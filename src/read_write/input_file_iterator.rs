@@ -41,7 +41,8 @@ impl Iterator for InputFileIterator {
 
     fn next(&mut self) -> Option<Point> {
         match self {
-            InputFileIterator::Ply(p) => p.next(),
+            // TODO(feuerste): Remove once all iterators work on PointsBatch
+            InputFileIterator::Ply(p) => p.next().map(Point::from),
             InputFileIterator::Pts(p) => p.next(),
         }
     }
@@ -50,7 +51,8 @@ impl Iterator for InputFileIterator {
 pub fn make_stream(input: &InputFile) -> (InputFileIterator, Option<ProgressBar<Stdout>>) {
     let stream = match *input {
         InputFile::Ply(ref filename) => {
-            InputFileIterator::Ply(PlyIterator::from_file(filename).unwrap())
+            // TODO(feuerste): Adjust batch size once all iterators work on PointsBatch
+            InputFileIterator::Ply(PlyIterator::from_file(filename, 1).unwrap())
         }
         InputFile::Pts(ref filename) => InputFileIterator::Pts(PtsIterator::from_file(filename)),
     };
