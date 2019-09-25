@@ -2,8 +2,8 @@ use crate::errors::*;
 use crate::math::PointCulling;
 use crate::math::{AllPoints, Frustum, Isometry3, Obb, OrientedBeam};
 use crate::read_write::{BatchIterator, Encoding};
-use crate::{AttributeData, Point, PointsBatch};
-use cgmath::{Matrix4, Point3, Vector3};
+use crate::{AttributeData, PointsBatch};
+use cgmath::{Matrix4, Point3};
 use collision::Aabb3;
 use crossbeam::deque::{Injector, Steal, Worker};
 use std::collections::BTreeMap;
@@ -85,6 +85,7 @@ where
     F: Fn(PointsBatch) -> Result<()>,
 {
     tmp: PointsBatch,
+    batch_size: usize,
     local_from_global: &'a Option<Isometry3<f64>>,
     func: &'a F,
 }
@@ -93,69 +94,37 @@ impl<'a, F> PointStream<'a, F>
 where
     F: Fn(PointsBatch) -> Result<()>,
 {
-    fn new(
-        num_points_per_batch: usize,
-        local_from_global: &'a Option<Isometry3<f64>>,
-        func: &'a F,
-    ) -> Self {
+    fn new(batch_size: usize, local_from_global: &'a Option<Isometry3<f64>>, func: &'a F) -> Self {
         PointStream {
             tmp: PointsBatch {
                 position: Vec::new(),
                 attributes: BTreeMap::new(),
             },
+            batch_size,
             local_from_global,
             func,
         }
     }
 
-    /// push point in batch
-    fn push_point(&mut self, point: Point) {
-        let position = match &self.local_from_global {
-            Some(local_from_global) => local_from_global * &point.position,
-            None => point.position,
-        };
-        self.position.push(position);
-        self.color.push(Vector3::new(
-            point.color.red,
-            point.color.green,
-            point.color.blue,
-        ));
-        if let Some(point_intensity) = point.intensity {
-            self.intensity.push(point_intensity);
-        };
-    }
-
     /// execute function on batch of points
     fn callback(&mut self) -> Result<()> {
-        if self.position.is_empty() {
+        if self.tmp.position.is_empty() {
             return Ok(());
         }
 
-        let mut attributes = BTreeMap::default();
-        attributes.insert(
-            "color".to_string(),
-            AttributeData::U8Vec3(self.color.split_off(0)),
-        );
-        if !self.intensity.is_empty() {
-            attributes.insert(
-                "intensity".to_string(),
-                AttributeData::F32(self.intensity.split_off(0)),
-            );
-        }
-        let points_batch = PointsBatch {
-            position: self.position.split_off(0),
-            attributes,
-        };
-        (self.func)(points_batch)
+        let at = std::cmp::min(self.tmp.position.len(), self.batch_size);
+        let mut res = self.tmp.split_off(at)?;
+        std::mem::swap(&mut res, &mut self.tmp);
+        (self.func)(res)
     }
 
     fn push_points_and_callback<I>(&mut self, batch_iterator: I) -> Result<()>
     where
         I: Iterator<Item = PointsBatch>,
     {
-        for batch in batch_iterator {
-            self.push_batch(point);
-            if self.position.len() == self.position.capacity() {
+        for mut batch in batch_iterator {
+            self.tmp.append(&mut batch)?;
+            while self.tmp.position.len() >= self.batch_size {
                 self.callback()?;
             }
         }

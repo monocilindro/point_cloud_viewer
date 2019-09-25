@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::color::Color;
-use crate::PointsBatch;
+use crate::{AttributeData, PointsBatch};
 use cgmath::Vector3;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -39,34 +38,48 @@ impl Iterator for PtsIterator {
     type Item = PointsBatch;
 
     fn next(&mut self) -> Option<PointsBatch> {
-        unimplemented!();
-        // let mut line = String::new();
-        // loop {
-        //     line.clear();
-        //     self.data.read_line(&mut line).unwrap();
-        //     if line.is_empty() {
-        //         break;
-        //     }
+        let mut batch = PointsBatch {
+            position: Vec::with_capacity(self.batch_size),
+            attributes: [(
+                "color".to_string(),
+                AttributeData::U8Vec3(Vec::with_capacity(self.batch_size)),
+            )]
+            .iter()
+            .cloned()
+            .collect(),
+        };
+        let mut point_count = 0;
+        let mut line = String::new();
+        while point_count < self.batch_size {
+            line.clear();
+            self.data.read_line(&mut line).unwrap();
+            if line.is_empty() {
+                break;
+            }
 
-        //     let parts: Vec<&str> = line.trim().split(|c| c == ' ' || c == ',').collect();
-        //     if parts.len() != 7 {
-        //         continue;
-        //     }
-        //     return Some(Point {
-        //         position: Vector3::new(
-        //             parts[0].parse::<f64>().unwrap(),
-        //             parts[1].parse::<f64>().unwrap(),
-        //             parts[2].parse::<f64>().unwrap(),
-        //         ),
-        //         color: Color {
-        //             red: parts[4].parse::<u8>().unwrap(),
-        //             green: parts[5].parse::<u8>().unwrap(),
-        //             blue: parts[6].parse::<u8>().unwrap(),
-        //             alpha: 255,
-        //         },
-        //         intensity: None,
-        //     });
-        // }
-        // None
+            let parts: Vec<&str> = line.trim().split(|c| c == ' ' || c == ',').collect();
+            if parts.len() != 7 {
+                continue;
+            }
+            batch.position.push(Vector3::new(
+                parts[0].parse::<f64>().unwrap(),
+                parts[1].parse::<f64>().unwrap(),
+                parts[2].parse::<f64>().unwrap(),
+            ));
+            batch
+                .get_attribute_vec_mut("color")
+                .unwrap()
+                .push(Vector3::new(
+                    parts[4].parse::<u8>().unwrap(),
+                    parts[5].parse::<u8>().unwrap(),
+                    parts[6].parse::<u8>().unwrap(),
+                ));
+            point_count += 1;
+        }
+        if point_count == 0 {
+            None
+        } else {
+            Some(batch)
+        }
     }
 }

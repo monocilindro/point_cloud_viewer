@@ -307,17 +307,35 @@ impl PointsBatch {
     }
 
     pub fn split_off(&mut self, at: usize) -> std::result::Result<Self, String> {
-        let res = Self {
+        let mut res = Self {
             position: self.position.split_off(at),
             attributes: BTreeMap::new(),
         };
-        for (name, attrib) in self.attributes.iter_mut() {
-            match attrib {
-                AttributeData::U8(data) => {
-                    res.attributes
-                        .insert(name.clone(), AttributeData::U8(data.split_off(at)));
+        use AttributeData::*;
+        for (name, attribute) in self.attributes.iter_mut() {
+            let name = name.clone();
+            match attribute {
+                U8(data) => {
+                    res.attributes.insert(name, U8(data.split_off(at)));
                 }
-                
+                U64(data) => {
+                    res.attributes.insert(name, U64(data.split_off(at)));
+                }
+                I64(data) => {
+                    res.attributes.insert(name, I64(data.split_off(at)));
+                }
+                F32(data) => {
+                    res.attributes.insert(name, F32(data.split_off(at)));
+                }
+                F64(data) => {
+                    res.attributes.insert(name, F64(data.split_off(at)));
+                }
+                U8Vec3(data) => {
+                    res.attributes.insert(name, U8Vec3(data.split_off(at)));
+                }
+                F64Vec3(data) => {
+                    res.attributes.insert(name, F64Vec3(data.split_off(at)));
+                }
             }
         }
         Ok(res)

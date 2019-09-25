@@ -20,7 +20,7 @@ use crate::read_write::{
     attempt_increasing_rlimit_to_max, make_stream, BatchIterator, Encoding, InputFile, NodeWriter,
     OpenMode, PositionEncoding, RawNodeWriter,
 };
-use crate::PointsBatch;
+use crate::{AttributeData, PointsBatch};
 use cgmath::{EuclideanSpace, Point3, Vector3};
 use collision::{Aabb, Aabb3};
 use fnv::{FnvHashMap, FnvHashSet};
@@ -189,6 +189,21 @@ fn split_node<'a, P>(
     }
 }
 
+fn retain(batch: &mut PointsBatch, mut write: impl Iterator<Item = bool>) {
+    batch.position.retain(|_| write.next().unwrap());
+    for a in batch.attributes.values_mut() {
+        match a {
+            AttributeData::U8(data) => data.retain(|_| write.next().unwrap()),
+            AttributeData::U64(data) => data.retain(|_| write.next().unwrap()),
+            AttributeData::I64(data) => data.retain(|_| write.next().unwrap()),
+            AttributeData::F32(data) => data.retain(|_| write.next().unwrap()),
+            AttributeData::F64(data) => data.retain(|_| write.next().unwrap()),
+            AttributeData::U8Vec3(data) => data.retain(|_| write.next().unwrap()),
+            AttributeData::F64Vec3(data) => data.retain(|_| write.next().unwrap()),
+        };
+    }
+}
+
 fn subsample_children_into(
     octree_data_provider: &OnDiskDataProvider,
     octree_meta: &octree::OctreeMeta,
@@ -205,7 +220,7 @@ fn subsample_children_into(
             Err(Error(ErrorKind::NodeNotFound, _)) => continue,
             Err(err) => return Err(err),
         };
-        let point_iterator = BatchIterator::from_data_provider(
+        let mut batch_iterator = BatchIterator::from_data_provider(
             octree_data_provider,
             octree_meta.encoding_for_node(child_id),
             &child_id,
@@ -215,18 +230,23 @@ fn subsample_children_into(
 
         // We read all points into memory, because the new node writer will rewrite this child's
         // file(s).
-        let mut points = Vec::with_capacity(num_points as usize);
-        point_iterator.for_each(|p| points.push(p));
+        let mut batch = batch_iterator.next().unwrap();
+        batch_iterator.for_each(|mut b| batch.append(&mut b).unwrap());
+        let parent_write: Vec<bool> = batch
+            .position
+            .iter()
+            .enumerate()
+            .map(|(idx, _)| idx % 8 == 0)
+            .collect();
+        let mut parent_batch = batch.clone();
+        retain(&mut parent_batch, parent_write.iter().copied().cycle());
+        let mut child_batch = batch;
+        retain(&mut child_batch, parent_write.iter().map(|w| !w).cycle());
 
         let mut child_writer =
             RawNodeWriter::from_data_provider(octree_data_provider, octree_meta, &child_id);
-        for (idx, p) in points.into_iter().enumerate() {
-            if idx % 8 == 0 {
-                parent_writer.write(&p)?;
-            } else {
-                child_writer.write(&p)?;
-            }
-        }
+        parent_writer.write(&parent_batch)?;
+        child_writer.write(&child_batch)?;
 
         // Update child.
         nodes_sender
