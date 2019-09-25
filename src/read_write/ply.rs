@@ -505,15 +505,15 @@ fn batch_from_readers(readers: &[PropertyReader]) -> PointsBatch {
                 };
                 let data = match reader.prop.data_type {
                     DataType::Uint8 => AttributeData::U8(Vec::new()),
-                    DataType::Int8 => continue,
-                    DataType::Uint16 => continue,
-                    DataType::Int16 => continue,
-                    DataType::Uint32 => continue,
-                    DataType::Int32 => continue,
                     DataType::Uint64 => AttributeData::U64(Vec::new()),
                     DataType::Int64 => AttributeData::I64(Vec::new()),
                     DataType::Float32 => AttributeData::F32(Vec::new()),
                     DataType::Float64 => AttributeData::F64(Vec::new()),
+                    DataType::Int8
+                    | DataType::Uint16
+                    | DataType::Int16
+                    | DataType::Uint32
+                    | DataType::Int32 => continue,
                 };
                 batch.attributes.insert(name.to_string(), data);
             }
@@ -528,11 +528,11 @@ fn push_into_multidimensional_attributes(batch: &mut PointsBatch) {
     batch.position.push(Vector3::zero());
     for a in batch.attributes.values_mut() {
         match a {
-            AttributeData::U8(_) => (),
-            AttributeData::U64(_) => (),
-            AttributeData::I64(_) => (),
-            AttributeData::F32(_) => (),
-            AttributeData::F64(_) => (),
+            AttributeData::U8(_)
+            | AttributeData::U64(_)
+            | AttributeData::I64(_)
+            | AttributeData::F32(_)
+            | AttributeData::F64(_) => (),
             AttributeData::F64Vec3(data) => data.push(Vector3::zero()),
             AttributeData::U8Vec3(data) => data.push(Vector3::zero()),
         }
