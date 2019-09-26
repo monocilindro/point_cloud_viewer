@@ -72,18 +72,11 @@ where
 {
     let mut children: Vec<Option<RawNodeWriter>> =
         vec![None, None, None, None, None, None, None, None];
-    let size = octree_data_provider
-        .number_of_points(&node_id.to_string())
-        .unwrap();
-    println!(
-        "Splitting {} which has {} points ({:.2}x MAX_POINTS_PER_NODE).",
-        node_id,
-        size,
-        size as f64 / MAX_POINTS_PER_NODE as f64
-    );
 
     let bounding_cube = node_id.find_bounding_cube(&Cube::bounding(&octree_meta.bounding_box));
+    let mut point_count = 0;
     stream.for_each(|batch| {
+        point_count += batch.position.len();
         let child_indices: Vec<_> = batch
             .position
             .iter()
@@ -108,6 +101,12 @@ where
             }
         }
     });
+    println!(
+        "Split {} which had {} points ({:.2}x MAX_POINTS_PER_NODE).",
+        node_id,
+        point_count,
+        point_count as f64 / MAX_POINTS_PER_NODE as f64
+    );
 
     // Remove the node file on disk by reopening the node and immediately dropping it again without
     // writing a point. This only saves some disk space during processing - all nodes will be
@@ -424,64 +423,96 @@ pub fn build_octree(
     meta.write_to_writer(&mut buf_writer).unwrap();
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::color::Color;
-//     use cgmath::Vector3;
-//     use num_traits::identities::Zero;
-//     use tempdir::TempDir;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::color::Color;
+    use crate::{AttributeData, Point};
+    use cgmath::Vector3;
+    use num_integer::div_ceil;
+    use num_traits::identities::Zero;
+    use std::collections::BTreeMap;
+    use tempdir::TempDir;
 
-//     struct Points {
-//         points: Vec<Point>,
-//         point_count: usize,
-//     }
+    struct Points {
+        points: Vec<Point>,
+        point_count: usize,
+    }
 
-//     impl Points {
-//         fn new(points: Vec<Point>) -> Self {
-//             Points {
-//                 points,
-//                 point_count: 0,
-//             }
-//         }
-//     }
+    impl Points {
+        fn new(points: Vec<Point>) -> Self {
+            Points {
+                points,
+                point_count: 0,
+            }
+        }
+    }
 
-//     impl Iterator for Points {
-//         type Item = Point;
+    impl Iterator for Points {
+        type Item = PointsBatch;
 
-//         fn next(&mut self) -> Option<Point> {
-//             if self.point_count == self.points.len() {
-//                 return None;
-//             }
-//             let point = self.points[self.point_count].clone();
-//             self.point_count += 1;
-//             Some(point)
-//         }
+        fn next(&mut self) -> Option<PointsBatch> {
+            if self.point_count == self.points.len() {
+                return None;
+            }
+            let mut position = Vec::with_capacity(NUM_POINTS_PER_BATCH);
+            let mut color = Vec::with_capacity(NUM_POINTS_PER_BATCH);
+            let mut intensity = None;
+            let init_count = self.point_count;
+            while self.point_count - init_count < NUM_POINTS_PER_BATCH
+                && self.point_count < self.points.len()
+            {
+                let point = &self.points[self.point_count];
+                position.push(point.position.clone());
+                color.push(Vector3::new(
+                    point.color.red,
+                    point.color.green,
+                    point.color.blue,
+                ));
+                if let Some(i) = point.intensity {
+                    if intensity.is_none() {
+                        intensity = Some(Vec::with_capacity(NUM_POINTS_PER_BATCH));
+                    }
+                    intensity.as_mut().unwrap().push(i);
+                }
+                self.point_count += 1;
+            }
+            let mut attributes = BTreeMap::new();
+            attributes.insert("color".to_string(), AttributeData::U8Vec3(color));
+            if let Some(intensity) = intensity {
+                attributes.insert("intensity".to_string(), AttributeData::F32(intensity));
+            }
+            Some(PointsBatch {
+                position,
+                attributes,
+            })
+        }
 
-//         fn size_hint(&self) -> (usize, Option<usize>) {
-//             (self.points.len(), Some(self.points.len()))
-//         }
-//     }
-//     #[test]
-//     fn test_generation() {
-//         let default_point = Point {
-//             position: Vector3::zero(),
-//             color: Color {
-//                 red: 255,
-//                 green: 0,
-//                 blue: 0,
-//                 alpha: 255,
-//             },
-//             intensity: None,
-//         };
-//         let mut points = vec![default_point; 100_001];
-//         points[100_000].position = Vector3::new(2.0, 0.0, 0.0);
-//         let mut bounding_box = Aabb3::zero();
-//         for point in &points {
-//             bounding_box = bounding_box.grow(Point3::from_vec(point.position));
-//         }
-//         let pool = scoped_pool::Pool::new(10);
-//         let tmp_dir = TempDir::new("octree").unwrap();
-//         build_octree(&pool, tmp_dir, 1.0, bounding_box, Points::new(points));
-//     }
-// }
+        fn size_hint(&self) -> (usize, Option<usize>) {
+            let num_batches = div_ceil(self.points.len(), NUM_POINTS_PER_BATCH);
+            (num_batches, Some(num_batches))
+        }
+    }
+    #[test]
+    fn test_generation() {
+        let default_point = Point {
+            position: Vector3::zero(),
+            color: Color {
+                red: 255,
+                green: 0,
+                blue: 0,
+                alpha: 255,
+            },
+            intensity: None,
+        };
+        let mut points = vec![default_point; 100_001];
+        points[100_000].position = Vector3::new(2.0, 0.0, 0.0);
+        let mut bounding_box = Aabb3::zero();
+        for point in &points {
+            bounding_box = bounding_box.grow(Point3::from_vec(point.position));
+        }
+        let pool = scoped_pool::Pool::new(10);
+        let tmp_dir = TempDir::new("octree").unwrap();
+        build_octree(&pool, tmp_dir, 1.0, bounding_box, Points::new(points));
+    }
+}
