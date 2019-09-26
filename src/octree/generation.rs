@@ -35,7 +35,6 @@ use std::io::BufWriter;
 use std::path::Path;
 use std::sync::mpsc;
 
-const UPDATE_COUNT: i64 = 100_000;
 const MAX_POINTS_PER_NODE: i64 = 100_000;
 
 impl RawNodeWriter {
@@ -271,14 +270,10 @@ fn find_bounding_box(input: &InputFile) -> Aabb3<f64> {
             }
             bounding_box = bounding_box.grow(Point3::from_vec(position));
             num_points += 1;
-            if num_points % UPDATE_COUNT == 0 {
-                progress_bar.as_mut().map(|pb| pb.add(UPDATE_COUNT as u64));
-            }
         }
+        progress_bar.as_mut().map(ProgressBar::inc);
     });
-    if let Some(mut f) = progress_bar {
-        f.finish()
-    }
+    progress_bar.as_mut().map(ProgressBar::finish);
     bounding_box
 }
 
