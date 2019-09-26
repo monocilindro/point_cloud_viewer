@@ -54,26 +54,14 @@ impl Iterator for FilteredIterator {
     fn next(&mut self) -> Option<PointsBatch> {
         let culling = &self.culling;
         self.batch_iterator.next().map(|mut batch| {
-            let retain: Vec<bool> = batch
+            let keep: Vec<bool> = batch
                 .position
                 .iter()
                 .map(|pos| {
                     culling.contains(&<Point3<f64> as cgmath::EuclideanSpace>::from_vec(*pos))
                 })
                 .collect();
-            let mut retain = retain.into_iter().cycle();
-            batch.position.retain(|_| retain.next().unwrap());
-            for a in batch.attributes.values_mut() {
-                match a {
-                    AttributeData::U8(data) => data.retain(|_| retain.next().unwrap()),
-                    AttributeData::U64(data) => data.retain(|_| retain.next().unwrap()),
-                    AttributeData::I64(data) => data.retain(|_| retain.next().unwrap()),
-                    AttributeData::F32(data) => data.retain(|_| retain.next().unwrap()),
-                    AttributeData::F64(data) => data.retain(|_| retain.next().unwrap()),
-                    AttributeData::U8Vec3(data) => data.retain(|_| retain.next().unwrap()),
-                    AttributeData::F64Vec3(data) => data.retain(|_| retain.next().unwrap()),
-                };
-            }
+            batch.retain(&keep);
             batch
         })
     }

@@ -189,21 +189,6 @@ fn split_node<'a, P>(
     }
 }
 
-fn retain(batch: &mut PointsBatch, mut write: impl Iterator<Item = bool>) {
-    batch.position.retain(|_| write.next().unwrap());
-    for a in batch.attributes.values_mut() {
-        match a {
-            AttributeData::U8(data) => data.retain(|_| write.next().unwrap()),
-            AttributeData::U64(data) => data.retain(|_| write.next().unwrap()),
-            AttributeData::I64(data) => data.retain(|_| write.next().unwrap()),
-            AttributeData::F32(data) => data.retain(|_| write.next().unwrap()),
-            AttributeData::F64(data) => data.retain(|_| write.next().unwrap()),
-            AttributeData::U8Vec3(data) => data.retain(|_| write.next().unwrap()),
-            AttributeData::F64Vec3(data) => data.retain(|_| write.next().unwrap()),
-        };
-    }
-}
-
 fn subsample_children_into(
     octree_data_provider: &OnDiskDataProvider,
     octree_meta: &octree::OctreeMeta,
@@ -232,16 +217,17 @@ fn subsample_children_into(
         // file(s).
         let mut batch = batch_iterator.next().unwrap();
         batch_iterator.for_each(|mut b| batch.append(&mut b).unwrap());
-        let parent_write: Vec<bool> = batch
-            .position
-            .iter()
-            .enumerate()
-            .map(|(idx, _)| idx % 8 == 0)
-            .collect();
+        let (keep_parent, keep_child): (Vec<bool>, Vec<bool>) = (0..batch.position.len())
+            .into_iter()
+            .map(|i| {
+                let in_parent = i % 8 == 0;
+                (in_parent, !in_parent)
+            })
+            .unzip();
         let mut parent_batch = batch.clone();
-        retain(&mut parent_batch, parent_write.iter().copied().cycle());
+        parent_batch.retain(&keep_parent);
         let mut child_batch = batch;
-        retain(&mut child_batch, parent_write.iter().map(|w| !w).cycle());
+        child_batch.retain(&keep_child);
 
         let mut child_writer =
             RawNodeWriter::from_data_provider(octree_data_provider, octree_meta, &child_id);

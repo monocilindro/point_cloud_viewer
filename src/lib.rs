@@ -341,6 +341,23 @@ impl PointsBatch {
         Ok(res)
     }
 
+    pub fn retain(&mut self, keep: &[bool]) {
+        assert_eq!(self.position.len(), keep.len());
+        let keep = keep.iter().copied().cycle();
+        self.position.retain(|_| keep.next().unwrap());
+        for a in self.attributes.values_mut() {
+            match a {
+                AttributeData::U8(data) => data.retain(|_| keep.next().unwrap()),
+                AttributeData::U64(data) => data.retain(|_| keep.next().unwrap()),
+                AttributeData::I64(data) => data.retain(|_| keep.next().unwrap()),
+                AttributeData::F32(data) => data.retain(|_| keep.next().unwrap()),
+                AttributeData::F64(data) => data.retain(|_| keep.next().unwrap()),
+                AttributeData::U8Vec3(data) => data.retain(|_| keep.next().unwrap()),
+                AttributeData::F64Vec3(data) => data.retain(|_| keep.next().unwrap()),
+            }
+        }
+    }
+
     pub fn get_attribute_vec<'a, T>(
         &'a self,
         key: impl AsRef<str>,
