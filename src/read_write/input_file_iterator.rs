@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::read_write::{PlyIterator, PtsIterator};
-use crate::PointsBatch;
+use crate::{PointsBatch, NUM_POINTS_PER_BATCH};
 use pbr::ProgressBar;
 use std::io::Stdout;
 use std::path::PathBuf;
@@ -48,14 +48,12 @@ impl Iterator for InputFileIterator {
 }
 
 pub fn make_stream(input: &InputFile) -> (InputFileIterator, Option<ProgressBar<Stdout>>) {
-    // TODO(feuerste): Adjust batch size once all iterators work on PointsBatch
-    let batch_size = 100_000;
     let stream = match *input {
         InputFile::Ply(ref filename) => {
-            InputFileIterator::Ply(PlyIterator::from_file(filename, batch_size).unwrap())
+            InputFileIterator::Ply(PlyIterator::from_file(filename, NUM_POINTS_PER_BATCH).unwrap())
         }
         InputFile::Pts(ref filename) => {
-            InputFileIterator::Pts(PtsIterator::from_file(filename, batch_size))
+            InputFileIterator::Pts(PtsIterator::from_file(filename, NUM_POINTS_PER_BATCH))
         }
     };
 
