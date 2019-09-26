@@ -141,11 +141,13 @@ fn main() {
         .wait()
         .unwrap();
     let pool = scoped_pool::Pool::new(10);
+    let num_points = points.len();
     build_octree(
         &pool,
         "/tmp/octree",
         0.001,
         bounding_box,
         Points::new(points),
+        num_points,
     );
 }
