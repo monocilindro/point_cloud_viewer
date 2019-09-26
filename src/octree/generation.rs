@@ -14,13 +14,15 @@
 
 use crate::errors::*;
 use crate::math::Cube;
-use crate::octree::{self, to_meta_proto, to_node_proto, NodeId, OctreeMeta, OnDiskDataProvider};
+use crate::octree::{
+    self, to_meta_proto, to_node_proto, ChildIndex, NodeId, OctreeMeta, OnDiskDataProvider,
+};
 use crate::proto;
 use crate::read_write::{
     attempt_increasing_rlimit_to_max, make_stream, BatchIterator, Encoding, InputFile, NodeWriter,
     OpenMode, PositionEncoding, RawNodeWriter,
 };
-use crate::{AttributeData, PointsBatch};
+use crate::{PointsBatch, NUM_POINTS_PER_BATCH};
 use cgmath::{EuclideanSpace, Point3, Vector3};
 use collision::{Aabb, Aabb3};
 use fnv::{FnvHashMap, FnvHashSet};
@@ -70,32 +72,40 @@ where
 {
     let mut children: Vec<Option<RawNodeWriter>> =
         vec![None, None, None, None, None, None, None, None];
-    // match stream.size_hint() {
-    //     (_, Some(size)) => println!(
-    //         "Splitting {} which has {} points ({:.2}x MAX_POINTS_PER_NODE).",
-    //         node_id,
-    //         size,
-    //         size as f64 / MAX_POINTS_PER_NODE as f64
-    //     ),
-    //     (_, None) => println!(
-    //         "Splitting {} which has an unknown number of points.",
-    //         node_id
-    //     ),
-    // };
+    let size = octree_data_provider
+        .number_of_points(&node_id.to_string())
+        .unwrap();
+    println!(
+        "Splitting {} which has {} points ({:.2}x MAX_POINTS_PER_NODE).",
+        node_id,
+        size,
+        size as f64 / MAX_POINTS_PER_NODE as f64
+    );
 
     let bounding_cube = node_id.find_bounding_cube(&Cube::bounding(&octree_meta.bounding_box));
     stream.for_each(|batch| {
-        for position in batch.position {
-            let child_index = octree::ChildIndex::from_bounding_cube(&bounding_cube, &p.position);
-            let array_index = child_index.as_u8() as usize;
-            if children[array_index].is_none() {
-                children[array_index] = Some(RawNodeWriter::from_data_provider(
-                    octree_data_provider,
-                    octree_meta,
-                    &node_id.get_child_id(child_index),
-                ));
+        let child_indices: Vec<_> = batch
+            .position
+            .iter()
+            .map(|p| octree::ChildIndex::from_bounding_cube(&bounding_cube, &p))
+            .collect();
+        for (array_index, child_writer) in children.iter_mut().enumerate() {
+            let mut child_batch = batch.clone();
+            let keep: Vec<_> = child_indices
+                .iter()
+                .map(|i| i.as_u8() == array_index as u8)
+                .collect();
+            child_batch.retain(&keep);
+            if !child_batch.position.is_empty() {
+                if child_writer.is_none() {
+                    *child_writer = Some(RawNodeWriter::from_data_provider(
+                        octree_data_provider,
+                        octree_meta,
+                        &node_id.get_child_id(ChildIndex::from_u8(array_index as u8)),
+                    ));
+                }
+                child_writer.as_mut().unwrap().write(&child_batch).unwrap();
             }
-            children[array_index].as_mut().unwrap().write(&p).unwrap();
         }
     });
 
@@ -154,7 +164,6 @@ fn split_node<'a, P>(
     node_id: &octree::NodeId,
     stream: P,
     leaf_nodes_sender: &mpsc::Sender<octree::NodeId>,
-    batch_size: usize,
 ) where
     P: Iterator<Item = PointsBatch>,
 {
@@ -169,7 +178,7 @@ fn split_node<'a, P>(
                 octree_data_provider
                     .number_of_points(&child_id.to_string())
                     .unwrap() as usize,
-                batch_size,
+                NUM_POINTS_PER_BATCH,
             )
             .unwrap();
             split_node(
@@ -179,7 +188,6 @@ fn split_node<'a, P>(
                 &child_id,
                 stream,
                 &leaf_nodes_sender_clone,
-                batch_size,
             );
         });
     }
@@ -194,7 +202,6 @@ fn subsample_children_into(
     octree_meta: &octree::OctreeMeta,
     node_id: &octree::NodeId,
     nodes_sender: &mpsc::Sender<(octree::NodeId, i64)>,
-    batch_size: usize,
 ) -> Result<()> {
     let mut parent_writer =
         RawNodeWriter::from_data_provider(octree_data_provider, octree_meta, node_id);
@@ -210,7 +217,7 @@ fn subsample_children_into(
             octree_meta.encoding_for_node(child_id),
             &child_id,
             num_points as usize,
-            batch_size,
+            NUM_POINTS_PER_BATCH,
         )?;
 
         // We read all points into memory, because the new node writer will rewrite this child's
@@ -218,7 +225,6 @@ fn subsample_children_into(
         let mut batch = batch_iterator.next().unwrap();
         batch_iterator.for_each(|mut b| batch.append(&mut b).unwrap());
         let (keep_parent, keep_child): (Vec<bool>, Vec<bool>) = (0..batch.position.len())
-            .into_iter()
             .map(|i| {
                 let in_parent = i % 8 == 0;
                 (in_parent, !in_parent)
@@ -282,7 +288,6 @@ pub fn build_octree_from_file(
     output_directory: impl AsRef<Path>,
     resolution: f64,
     filename: impl AsRef<Path>,
-    batch_size: usize,
 ) {
     // TODO(ksavinash9): This function should return a Result.
     let input = {
@@ -298,14 +303,7 @@ pub fn build_octree_from_file(
     };
     let bounding_box = find_bounding_box(&input);
     let (stream, _) = make_stream(&input);
-    build_octree(
-        pool,
-        output_directory,
-        resolution,
-        bounding_box,
-        stream,
-        batch_size,
-    )
+    build_octree(pool, output_directory, resolution, bounding_box, stream)
 }
 
 pub fn build_octree(
@@ -314,7 +312,6 @@ pub fn build_octree(
     resolution: f64,
     bounding_box: Aabb3<f64>,
     input: impl Iterator<Item = PointsBatch>,
-    batch_size: usize,
 ) {
     attempt_increasing_rlimit_to_max();
 
@@ -343,7 +340,6 @@ pub fn build_octree(
             &root_node.id,
             input,
             &leaf_nodes_sender,
-            batch_size,
         );
     });
 
@@ -397,7 +393,6 @@ pub fn build_octree(
                         octree_meta,
                         id,
                         &finished_nodes_sender_clone,
-                        batch_size,
                     )
                     .unwrap();
                     progress_tx_clone.send(()).unwrap();

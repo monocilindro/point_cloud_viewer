@@ -2,7 +2,7 @@ use crate::errors::*;
 use crate::math::PointCulling;
 use crate::math::{AllPoints, Frustum, Isometry3, Obb, OrientedBeam};
 use crate::read_write::{BatchIterator, Encoding};
-use crate::{AttributeData, PointsBatch};
+use crate::PointsBatch;
 use cgmath::{Matrix4, Point3};
 use collision::Aabb3;
 use crossbeam::deque::{Injector, Steal, Worker};
@@ -111,6 +111,13 @@ where
         I: Iterator<Item = PointsBatch>,
     {
         for mut batch in batch_iterator {
+            if let Some(local_from_global) = &self.local_from_global {
+                batch.position = batch
+                    .position
+                    .iter()
+                    .map(|p| local_from_global * p)
+                    .collect();
+            }
             self.tmp.append(&mut batch)?;
             while self.tmp.position.len() >= self.batch_size {
                 self.callback()?;

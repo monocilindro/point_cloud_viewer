@@ -343,7 +343,7 @@ impl PointsBatch {
 
     pub fn retain(&mut self, keep: &[bool]) {
         assert_eq!(self.position.len(), keep.len());
-        let keep = keep.iter().copied().cycle();
+        let mut keep = keep.iter().copied().cycle();
         self.position.retain(|_| keep.next().unwrap());
         for a in self.attributes.values_mut() {
             match a {

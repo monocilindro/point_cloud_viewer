@@ -35,20 +35,10 @@ struct CommandlineArguments {
     /// The number of threads used to shard octree building. Set this as high as possible for SSDs.
     #[structopt(long = "num_threads", default_value = "10")]
     num_threads: usize,
-
-    /// The number of points per batch.
-    #[structopt(long = "batch_size", default_value = "100000")]
-    batch_size: usize,
 }
 
 fn main() {
     let args = CommandlineArguments::from_args();
     let pool = scoped_pool::Pool::new(args.num_threads);
-    build_octree_from_file(
-        &pool,
-        args.output_directory,
-        args.resolution,
-        args.input,
-        args.batch_size,
-    );
+    build_octree_from_file(&pool, args.output_directory, args.resolution, args.input);
 }
