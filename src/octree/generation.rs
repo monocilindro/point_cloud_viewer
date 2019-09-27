@@ -268,11 +268,11 @@ fn find_bounding_box(input: &InputFile) -> Aabb3<f64> {
     stream.for_each(|batch| {
         for position in batch.position {
             let p3 = Point3::from_vec(position);
-            if bounding_box.is_none() {
-                bounding_box = Some(Aabb3::new(p3, p3));
+            bounding_box = if bounding_box.is_none() {
+                Some(Aabb3::new(p3, p3))
             } else {
-                bounding_box.map(|b| b.grow(p3));
-            }
+                bounding_box.map(|b| b.grow(p3))
+            };
         }
         progress_bar.as_mut().map(ProgressBar::inc);
     });
