@@ -259,8 +259,7 @@ fn subsample_children_into(
 
 /// Returns the bounding box containing all points
 fn find_bounding_box(input: &InputFile) -> Aabb3<f64> {
-    let mut num_points = 0;
-    let mut bounding_box = Aabb3::zero();
+    let mut bounding_box = None;
     let (stream, mut progress_bar) = make_stream(input);
     if let Some(pb) = progress_bar.as_mut() {
         pb.message("Determining bounding box: ")
@@ -268,17 +267,17 @@ fn find_bounding_box(input: &InputFile) -> Aabb3<f64> {
 
     stream.for_each(|batch| {
         for position in batch.position {
-            if num_points == 0 {
-                let p3 = Point3::from_vec(position);
-                bounding_box = Aabb3::new(p3, p3);
+            let p3 = Point3::from_vec(position);
+            if bounding_box.is_none() {
+                bounding_box = Some(Aabb3::new(p3, p3));
+            } else {
+                bounding_box.map(|b| b.grow(p3));
             }
-            bounding_box = bounding_box.grow(Point3::from_vec(position));
-            num_points += 1;
         }
         progress_bar.as_mut().map(ProgressBar::inc);
     });
     progress_bar.as_mut().map(ProgressBar::finish);
-    bounding_box
+    bounding_box.unwrap_or_else(Aabb3::zero)
 }
 
 pub fn build_octree_from_file(
