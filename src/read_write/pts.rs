@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{AttributeData, PointsBatch};
+use crate::{AttributeData, NumberOfPoints, PointsBatch};
 use cgmath::Vector3;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -34,6 +34,11 @@ impl PtsIterator {
     }
 }
 
+impl NumberOfPoints for PtsIterator {
+    fn num_points(&self) -> Option<usize> {
+        None
+    }
+}
 impl Iterator for PtsIterator {
     type Item = PointsBatch;
 

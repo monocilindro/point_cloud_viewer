@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::read_write::RawNodeReader;
-use crate::PointsBatch;
+use crate::{NumberOfPoints, PointsBatch};
 use num_integer::div_ceil;
 
 /// Streams points from our data provider representation.
@@ -47,6 +47,12 @@ impl BatchIterator {
             point_count: 0,
             batch_size,
         }
+    }
+}
+
+impl NumberOfPoints for BatchIterator {
+    fn num_points(&self) -> Option<usize> {
+        Some(self.num_points)
     }
 }
 

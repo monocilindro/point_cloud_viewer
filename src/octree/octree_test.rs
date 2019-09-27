@@ -3,12 +3,18 @@ mod tests {
     use crate::errors::Result;
     use crate::iterator::{ParallelIterator, PointLocation, PointQuery};
     use crate::octree::{self, build_octree, Octree};
-    use crate::{AttributeData, PointsBatch};
+    use crate::{AttributeData, NumberOfPoints, PointsBatch};
     use cgmath::{EuclideanSpace, Point3, Vector3};
     use collision::{Aabb, Aabb3};
     use tempdir::TempDir;
 
     const NUM_POINTS: usize = 100_001;
+
+    impl<T> NumberOfPoints for std::vec::IntoIter<T> {
+        fn num_points(&self) -> Option<usize> {
+            Some(self.len())
+        }
+    }
 
     fn build_big_test_octree() -> Box<octree::Octree> {
         let mut batch = PointsBatch {

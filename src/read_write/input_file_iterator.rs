@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::read_write::{PlyIterator, PtsIterator};
-use crate::{PointsBatch, NUM_POINTS_PER_BATCH};
+use crate::{NumberOfPoints, PointsBatch, NUM_POINTS_PER_BATCH};
 use pbr::ProgressBar;
 use std::io::Stdout;
 use std::path::PathBuf;
@@ -27,6 +27,15 @@ pub enum InputFile {
 pub enum InputFileIterator {
     Ply(PlyIterator),
     Pts(PtsIterator),
+}
+
+impl NumberOfPoints for InputFileIterator {
+    fn num_points(&self) -> Option<usize> {
+        match self {
+            InputFileIterator::Ply(p) => p.num_points(),
+            InputFileIterator::Pts(p) => p.num_points(),
+        }
+    }
 }
 
 impl Iterator for InputFileIterator {

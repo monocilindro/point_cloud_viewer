@@ -22,7 +22,7 @@ use crate::read_write::{
     attempt_increasing_rlimit_to_max, make_stream, BatchIterator, Encoding, InputFile, NodeWriter,
     OpenMode, PositionEncoding, RawNodeWriter,
 };
-use crate::{PointsBatch, NUM_POINTS_PER_BATCH};
+use crate::{NumberOfPoints, PointsBatch, NUM_POINTS_PER_BATCH};
 use cgmath::{EuclideanSpace, Point3, Vector3};
 use collision::{Aabb, Aabb3};
 use fnv::{FnvHashMap, FnvHashSet};
@@ -67,10 +67,22 @@ fn split<P>(
     stream: P,
 ) -> (Vec<octree::NodeId>, Vec<octree::NodeId>)
 where
-    P: Iterator<Item = PointsBatch>,
+    P: Iterator<Item = PointsBatch> + NumberOfPoints,
 {
     let mut children: Vec<Option<RawNodeWriter>> =
         vec![None, None, None, None, None, None, None, None];
+    match stream.num_points() {
+        Some(size) => println!(
+            "Splitting {} which has {} points ({:.2}x MAX_POINTS_PER_NODE).",
+            node_id,
+            size,
+            size as f64 / MAX_POINTS_PER_NODE as f64
+        ),
+        None => println!(
+            "Splitting {} which has an unknown number of points.",
+            node_id
+        ),
+    };
 
     let bounding_cube = node_id.find_bounding_cube(&Cube::bounding(&octree_meta.bounding_box));
     stream.for_each(|batch| {
@@ -154,28 +166,20 @@ fn split_node<'a, P>(
     node_id: &octree::NodeId,
     stream: P,
     leaf_nodes_sender: &mpsc::Sender<octree::NodeId>,
-    num_points: usize,
 ) where
-    P: Iterator<Item = PointsBatch>,
+    P: Iterator<Item = PointsBatch> + NumberOfPoints,
 {
-    println!(
-        "Splitting {} which has {} points ({:.2}x MAX_POINTS_PER_NODE).",
-        node_id,
-        num_points,
-        num_points as f64 / MAX_POINTS_PER_NODE as f64
-    );
     let (leaf_nodes, split_nodes) = split(octree_data_provider, octree_meta, node_id, stream);
     for child_id in split_nodes {
         let leaf_nodes_sender_clone = leaf_nodes_sender.clone();
         scope.recurse(move |scope| {
-            let child_num_points = octree_data_provider
-                .number_of_points(&child_id.to_string())
-                .unwrap() as usize;
             let stream = BatchIterator::from_data_provider(
                 octree_data_provider,
                 octree_meta.encoding_for_node(child_id),
                 &child_id,
-                child_num_points,
+                octree_data_provider
+                    .number_of_points(&child_id.to_string())
+                    .unwrap() as usize,
                 NUM_POINTS_PER_BATCH,
             )
             .unwrap();
@@ -186,7 +190,6 @@ fn split_node<'a, P>(
                 &child_id,
                 stream,
                 &leaf_nodes_sender_clone,
-                child_num_points,
             );
         });
     }
@@ -255,7 +258,7 @@ fn subsample_children_into(
 }
 
 /// Returns the bounding box containing all points
-fn find_bounding_box(input: &InputFile) -> (Aabb3<f64>, usize) {
+fn find_bounding_box(input: &InputFile) -> Aabb3<f64> {
     let mut num_points = 0;
     let mut bounding_box = Aabb3::zero();
     let (stream, mut progress_bar) = make_stream(input);
@@ -275,7 +278,7 @@ fn find_bounding_box(input: &InputFile) -> (Aabb3<f64>, usize) {
         progress_bar.as_mut().map(ProgressBar::inc);
     });
     progress_bar.as_mut().map(ProgressBar::finish);
-    (bounding_box, num_points)
+    bounding_box
 }
 
 pub fn build_octree_from_file(
@@ -296,16 +299,9 @@ pub fn build_octree_from_file(
             other => panic!("Unknown input file format: {:?}", other),
         }
     };
-    let (bounding_box, num_points) = find_bounding_box(&input);
+    let bounding_box = find_bounding_box(&input);
     let (stream, _) = make_stream(&input);
-    build_octree(
-        pool,
-        output_directory,
-        resolution,
-        bounding_box,
-        stream,
-        num_points,
-    )
+    build_octree(pool, output_directory, resolution, bounding_box, stream)
 }
 
 pub fn build_octree(
@@ -313,8 +309,7 @@ pub fn build_octree(
     output_directory: impl AsRef<Path>,
     resolution: f64,
     bounding_box: Aabb3<f64>,
-    input: impl Iterator<Item = PointsBatch>,
-    num_points: usize,
+    input: impl Iterator<Item = PointsBatch> + NumberOfPoints,
 ) {
     attempt_increasing_rlimit_to_max();
 
@@ -343,7 +338,6 @@ pub fn build_octree(
             &root_node.id,
             input,
             &leaf_nodes_sender,
-            num_points,
         );
     });
 
@@ -453,6 +447,12 @@ mod tests {
         }
     }
 
+    impl NumberOfPoints for Points {
+        fn num_points(&self) -> Option<usize> {
+            Some(self.points.len())
+        }
+    }
+
     impl Iterator for Points {
         type Item = PointsBatch;
 
@@ -518,13 +518,6 @@ mod tests {
         }
         let pool = scoped_pool::Pool::new(10);
         let tmp_dir = TempDir::new("octree").unwrap();
-        build_octree(
-            &pool,
-            tmp_dir,
-            1.0,
-            bounding_box,
-            Points::new(points),
-            points.len(),
-        );
+        build_octree(&pool, tmp_dir, 1.0, bounding_box, Points::new(points));
     }
 }

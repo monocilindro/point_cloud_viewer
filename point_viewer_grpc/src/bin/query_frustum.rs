@@ -20,7 +20,7 @@ use grpcio::{ChannelBuilder, EnvBuilder};
 use num_integer::div_ceil;
 use point_viewer::color::Color;
 use point_viewer::octree::build_octree;
-use point_viewer::{AttributeData, Point, PointsBatch, NUM_POINTS_PER_BATCH};
+use point_viewer::{AttributeData, NumberOfPoints, Point, PointsBatch, NUM_POINTS_PER_BATCH};
 pub use point_viewer_grpc_proto_rust::proto::GetPointsInFrustumRequest;
 pub use point_viewer_grpc_proto_rust::proto_grpc;
 use std::collections::BTreeMap;
@@ -37,6 +37,12 @@ impl Points {
             points,
             point_count: 0,
         }
+    }
+}
+
+impl NumberOfPoints for Points {
+    fn num_points(&self) -> Option<usize> {
+        Some(self.points.len())
     }
 }
 
@@ -141,13 +147,11 @@ fn main() {
         .wait()
         .unwrap();
     let pool = scoped_pool::Pool::new(10);
-    let num_points = points.len();
     build_octree(
         &pool,
         "/tmp/octree",
         0.001,
         bounding_box,
         Points::new(points),
-        num_points,
     );
 }
