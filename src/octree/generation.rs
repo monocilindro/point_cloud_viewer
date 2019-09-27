@@ -467,7 +467,7 @@ mod tests {
                 && self.point_count < self.points.len()
             {
                 let point = &self.points[self.point_count];
-                position.push(point.position.clone());
+                position.push(point.position);
                 color.push(Vector3::new(
                     point.color.red,
                     point.color.green,
