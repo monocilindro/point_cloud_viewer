@@ -101,7 +101,7 @@ where
         }
 
         let at = std::cmp::min(self.tmp.position.len(), self.batch_size);
-        let mut res = self.tmp.split_off(at)?;
+        let mut res = self.tmp.split_off(at);
         std::mem::swap(&mut res, &mut self.tmp);
         (self.func)(res)
     }
