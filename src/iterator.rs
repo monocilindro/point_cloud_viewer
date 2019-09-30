@@ -72,7 +72,7 @@ struct PointStream<'a, F>
 where
     F: Fn(PointsBatch) -> Result<()>,
 {
-    tmp: PointsBatch,
+    buf: PointsBatch,
     batch_size: usize,
     local_from_global: &'a Option<Isometry3<f64>>,
     func: &'a F,
@@ -84,7 +84,7 @@ where
 {
     fn new(batch_size: usize, local_from_global: &'a Option<Isometry3<f64>>, func: &'a F) -> Self {
         PointStream {
-            tmp: PointsBatch {
+            buf: PointsBatch {
                 position: Vec::new(),
                 attributes: BTreeMap::new(),
             },
@@ -96,13 +96,13 @@ where
 
     /// execute function on batch of points
     fn callback(&mut self) -> Result<()> {
-        if self.tmp.position.is_empty() {
+        if self.buf.position.is_empty() {
             return Ok(());
         }
 
-        let at = std::cmp::min(self.tmp.position.len(), self.batch_size);
-        let mut res = self.tmp.split_off(at);
-        std::mem::swap(&mut res, &mut self.tmp);
+        let at = std::cmp::min(self.buf.position.len(), self.batch_size);
+        let mut res = self.buf.split_off(at);
+        std::mem::swap(&mut res, &mut self.buf);
         (self.func)(res)
     }
 
@@ -118,8 +118,8 @@ where
                     .map(|p| local_from_global * p)
                     .collect();
             }
-            self.tmp.append(&mut batch)?;
-            while self.tmp.position.len() >= self.batch_size {
+            self.buf.append(&mut batch)?;
+            while self.buf.position.len() >= self.batch_size {
                 self.callback()?;
             }
         }
