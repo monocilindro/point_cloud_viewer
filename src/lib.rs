@@ -247,20 +247,6 @@ pub struct PointsBatch {
 }
 
 impl PointsBatch {
-    fn append_attribute<'a, T: 'a>(
-        &'a mut self,
-        name: &str,
-        other: &'a mut PointsBatch,
-    ) -> std::result::Result<(), String>
-    where
-        &'a mut Vec<T>: TryFrom<&'a mut AttributeData, Error = String>,
-    {
-        let self_vec: &'a mut Vec<T> = self.get_attribute_vec_mut(name)?;
-        let other_vec: &'a mut Vec<T> = other.get_attribute_vec_mut(name)?;
-        self_vec.append(other_vec);
-        Ok(())
-    }
-
     pub fn append(&mut self, other: &mut PointsBatch) -> std::result::Result<(), String> {
         if self.position.is_empty() {
             *self = other.split_off(0);
@@ -275,13 +261,13 @@ impl PointsBatch {
             for (name, dtype) in &data_types {
                 use AttributeDataType::*;
                 match dtype {
-                    U8 => self.append_attribute::<u8>(name, other)?,
-                    U64 => self.append_attribute::<u64>(name, other)?,
-                    I64 => self.append_attribute::<i64>(name, other)?,
-                    F32 => self.append_attribute::<f32>(name, other)?,
-                    F64 => self.append_attribute::<f64>(name, other)?,
-                    U8Vec3 => self.append_attribute::<Vector3<u8>>(name, other)?,
-                    F64Vec3 => self.append_attribute::<Vector3<f64>>(name, other)?,
+                    U8 => append_attribute::<u8>(name, self, other)?,
+                    U64 => append_attribute::<u64>(name, self, other)?,
+                    I64 => append_attribute::<i64>(name, self, other)?,
+                    F32 => append_attribute::<f32>(name, self, other)?,
+                    F64 => append_attribute::<f64>(name, self, other)?,
+                    U8Vec3 => append_attribute::<Vector3<u8>>(name, self, other)?,
+                    F64Vec3 => append_attribute::<Vector3<f64>>(name, self, other)?,
                 };
             }
         }
