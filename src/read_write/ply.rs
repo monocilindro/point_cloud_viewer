@@ -223,7 +223,7 @@ fn parse_header<R: BufRead>(reader: &mut R) -> Result<(Header, usize)> {
     ))
 }
 
-type ReadingFn = fn(nread: &mut usize, buf: &[u8], val: &mut PointsBatch, name: &str);
+type ReadingFn = fn(nread: &mut usize, read_buf: &[u8], write_buf: &mut [u8], write_pos: usize);
 
 // The two macros create a 'ReadingFn' that reads a value of '$data_type' out of a reader, and
 // calls '$assign' with it while casting it to the correct type. I did not find a way of doing this
@@ -231,9 +231,9 @@ type ReadingFn = fn(nread: &mut usize, buf: &[u8], val: &mut PointsBatch, name: 
 macro_rules! create_and_return_reading_fn {
     ($assign:expr, $size:ident, $num_bytes:expr, $reading_fn:expr) => {{
         $size += $num_bytes;
-        |nread: &mut usize, buf: &[u8], batch: &mut PointsBatch, name: &str| {
+        |nread: &mut usize, read_buf: &[u8], write_buf: &mut [u8], write_pos: usize| {
             #[allow(clippy::cast_lossless)]
-            $assign(batch, name, $reading_fn(buf) as _);
+            $assign(write_buf, write_pos, $reading_fn(read_buf) as _);
             *nread += $num_bytes;
         }
     }};
@@ -241,54 +241,52 @@ macro_rules! create_and_return_reading_fn {
 
 macro_rules! read_casted_property {
     ($prop:expr, $assign:expr, &mut $size:ident) => {
-        PropertyReader {
-            prop: $prop.clone(),
-            func: match $prop.data_type {
-                DataType::Uint8 => {
-                    create_and_return_reading_fn!($assign, $size, 1, |buf: &[u8]| buf[0])
-                }
-                DataType::Int8 => {
-                    create_and_return_reading_fn!($assign, $size, 1, |buf: &[u8]| buf[0])
-                }
-                DataType::Uint16 => {
-                    create_and_return_reading_fn!($assign, $size, 2, LittleEndian::read_u16)
-                }
-                DataType::Int16 => {
-                    create_and_return_reading_fn!($assign, $size, 2, LittleEndian::read_i16)
-                }
-                DataType::Uint32 => {
-                    create_and_return_reading_fn!($assign, $size, 4, LittleEndian::read_u32)
-                }
-                DataType::Int32 => {
-                    create_and_return_reading_fn!($assign, $size, 4, LittleEndian::read_i32)
-                }
-                DataType::Uint64 => {
-                    create_and_return_reading_fn!($assign, $size, 4, LittleEndian::read_u64)
-                }
-                DataType::Int64 => {
-                    create_and_return_reading_fn!($assign, $size, 4, LittleEndian::read_i64)
-                }
-                DataType::Float32 => {
-                    create_and_return_reading_fn!($assign, $size, 4, LittleEndian::read_f32)
-                }
-                DataType::Float64 => {
-                    create_and_return_reading_fn!($assign, $size, 8, LittleEndian::read_f64)
-                }
-            },
+        match $prop.data_type {
+            DataType::Uint8 => {
+                create_and_return_reading_fn!($assign, $size, 1, |buf: &[u8]| buf[0])
+            }
+            DataType::Int8 => create_and_return_reading_fn!($assign, $size, 1, |buf: &[u8]| buf[0]),
+            DataType::Uint16 => {
+                create_and_return_reading_fn!($assign, $size, 2, LittleEndian::read_u16)
+            }
+            DataType::Int16 => {
+                create_and_return_reading_fn!($assign, $size, 2, LittleEndian::read_i16)
+            }
+            DataType::Uint32 => {
+                create_and_return_reading_fn!($assign, $size, 4, LittleEndian::read_u32)
+            }
+            DataType::Int32 => {
+                create_and_return_reading_fn!($assign, $size, 4, LittleEndian::read_i32)
+            }
+            DataType::Uint64 => {
+                create_and_return_reading_fn!($assign, $size, 4, LittleEndian::read_u64)
+            }
+            DataType::Int64 => {
+                create_and_return_reading_fn!($assign, $size, 4, LittleEndian::read_i64)
+            }
+            DataType::Float32 => {
+                create_and_return_reading_fn!($assign, $size, 4, LittleEndian::read_f32)
+            }
+            DataType::Float64 => {
+                create_and_return_reading_fn!($assign, $size, 8, LittleEndian::read_f64)
+            }
         }
     };
 }
 
 macro_rules! push_reader {
-    ($readers:ident, $prop:expr, &mut $num_bytes:ident, $dtype:ty) => {{
-        $readers.push(read_casted_property!(
-            $prop,
-            |p: &mut PointsBatch, name: &str, val| {
-                let vec: &mut Vec<$dtype> = p.get_attribute_vec_mut(name).unwrap();
-                vec.push(val)
-            },
-            &mut $num_bytes
-        ));
+    ($readers:ident, $prop:expr, &mut $num_bytes:ident, $batch_size:ident, $dtype:ty) => {{
+        $readers.push(PropertyReader {
+            prop: $prop.clone(),
+            buf: vec![0; std::mem::size_of::<$dtype>() * $batch_size],
+            func: read_casted_property!(
+                $prop,
+                |write_buf: &mut [u8], write_pos: usize, val: $dtype| {
+                    unsafe { (*(write_buf as *mut [u8] as *mut [$dtype]))[write_pos] = val };
+                },
+                &mut $num_bytes
+            ),
+        });
     }};
 }
 
@@ -298,11 +296,12 @@ macro_rules! create_skip_fn {
     ($prop:expr, &mut $size:ident, $num_bytes:expr) => {{
         println!("Will ignore property '{}' on 'vertex'.", $prop.name);
         $size += $num_bytes;
-        fn _read_fn(nread: &mut usize, _: &[u8], _: &mut PointsBatch, _: &str) {
+        fn _read_fn(nread: &mut usize, _: &[u8], _: &mut [u8], _: usize) {
             *nread += $num_bytes;
         }
         PropertyReader {
             prop: $prop.clone(),
+            buf: Vec::new(),
             func: _read_fn,
         }
     }};
@@ -310,6 +309,7 @@ macro_rules! create_skip_fn {
 
 struct PropertyReader {
     prop: ScalarProperty,
+    buf: Vec<u8>,
     func: ReadingFn,
 }
 
@@ -350,76 +350,40 @@ impl PlyIterator {
         for prop in &vertex.properties {
             match &prop.name as &str {
                 "x" => {
-                    readers.push(read_casted_property!(
-                        prop,
-                        |p: &mut PointsBatch, _: &str, val: f64| p.position.last_mut().unwrap().x =
-                            val,
-                        &mut num_bytes_per_point
-                    ));
+                    push_reader!(readers, prop, &mut num_bytes_per_point, batch_size, f64);
                     seen_x = true;
                 }
                 "y" => {
-                    readers.push(read_casted_property!(
-                        prop,
-                        |p: &mut PointsBatch, _: &str, val: f64| p.position.last_mut().unwrap().y =
-                            val,
-                        &mut num_bytes_per_point
-                    ));
+                    push_reader!(readers, prop, &mut num_bytes_per_point, batch_size, f64);
                     seen_y = true;
                 }
                 "z" => {
-                    readers.push(read_casted_property!(
-                        prop,
-                        |p: &mut PointsBatch, _: &str, val: f64| p.position.last_mut().unwrap().z =
-                            val,
-                        &mut num_bytes_per_point
-                    ));
+                    push_reader!(readers, prop, &mut num_bytes_per_point, batch_size, f64);
                     seen_z = true;
-                }
-                "r" | "red" => {
-                    readers.push(read_casted_property!(
-                        prop,
-                        |p: &mut PointsBatch, _: &str, val: u8| {
-                            let vec: &mut Vec<Vector3<u8>> =
-                                p.get_attribute_vec_mut("color").unwrap();
-                            vec.last_mut().unwrap().x = val
-                        },
-                        &mut num_bytes_per_point
-                    ));
-                }
-                "g" | "green" => {
-                    readers.push(read_casted_property!(
-                        prop,
-                        |p: &mut PointsBatch, _: &str, val: u8| {
-                            let vec: &mut Vec<Vector3<u8>> =
-                                p.get_attribute_vec_mut("color").unwrap();
-                            vec.last_mut().unwrap().y = val
-                        },
-                        &mut num_bytes_per_point
-                    ));
-                }
-                "b" | "blue" => {
-                    readers.push(read_casted_property!(
-                        prop,
-                        |p: &mut PointsBatch, _: &str, val: u8| {
-                            let vec: &mut Vec<Vector3<u8>> =
-                                p.get_attribute_vec_mut("color").unwrap();
-                            vec.last_mut().unwrap().z = val
-                        },
-                        &mut num_bytes_per_point
-                    ));
                 }
                 "a" | "alpha" => {
                     readers.push(create_skip_fn!(prop, &mut num_bytes_per_point, 1));
                 }
-                _ => {
+                other => {
+                    assert!(!other.chars().last().unwrap().is_ascii_digit(),
+                    "Multidimensional attributes other than position and color are currently unsupported.");
                     use self::DataType::*;
                     match prop.data_type {
-                        Uint8 => push_reader!(readers, prop, &mut num_bytes_per_point, u8),
-                        Uint64 => push_reader!(readers, prop, &mut num_bytes_per_point, u64),
-                        Int64 => push_reader!(readers, prop, &mut num_bytes_per_point, i64),
-                        Float32 => push_reader!(readers, prop, &mut num_bytes_per_point, f32),
-                        Float64 => push_reader!(readers, prop, &mut num_bytes_per_point, f64),
+                        Uint8 => {
+                            push_reader!(readers, prop, &mut num_bytes_per_point, batch_size, u8)
+                        }
+                        Uint64 => {
+                            push_reader!(readers, prop, &mut num_bytes_per_point, batch_size, u64)
+                        }
+                        Int64 => {
+                            push_reader!(readers, prop, &mut num_bytes_per_point, batch_size, i64)
+                        }
+                        Float32 => {
+                            push_reader!(readers, prop, &mut num_bytes_per_point, batch_size, f32)
+                        }
+                        Float64 => {
+                            push_reader!(readers, prop, &mut num_bytes_per_point, batch_size, f64)
+                        }
                         Int8 => readers.push(create_skip_fn!(prop, &mut num_bytes_per_point, 1)),
                         Uint16 | Int16 => {
                             readers.push(create_skip_fn!(prop, &mut num_bytes_per_point, 2))
@@ -450,61 +414,70 @@ impl PlyIterator {
     }
 }
 
-fn batch_from_readers(readers: &[PropertyReader], batch_size: usize) -> PointsBatch {
-    let mut batch = PointsBatch {
-        position: Vec::with_capacity(batch_size),
-        attributes: BTreeMap::new(),
-    };
+fn to_vec<T>(slice: &[u8], cur_batch_size: usize) -> Vec<T>
+where
+    T: Clone,
+{
+    let ptr = slice.as_ptr() as *const T;
+    unsafe { std::slice::from_raw_parts(ptr, cur_batch_size).to_vec() }
+}
+
+fn batch_from_readers(
+    readers: &[PropertyReader],
+    batch_size: usize,
+    offset: &Vector3<f64>,
+) -> PointsBatch {
+    let (mut x_vec, mut y_vec, mut z_vec) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut r_vec, mut g_vec, mut b_vec) = (Vec::new(), Vec::new(), Vec::new());
+    let mut attributes = BTreeMap::new();
     for reader in readers {
         match &reader.prop.name as &str {
-            "x" | "y" | "z" => {}
-            "r" | "red" => {
-                batch.attributes.insert(
-                    "color".to_string(),
-                    AttributeData::U8Vec3(Vec::with_capacity(batch_size)),
-                );
-            }
-            "g" | "green" | "b" | "blue" | "a" | "alpha" => {}
+            "x" => x_vec = to_vec::<f64>(&reader.buf, batch_size),
+            "y" => y_vec = to_vec::<f64>(&reader.buf, batch_size),
+            "z" => z_vec = to_vec::<f64>(&reader.buf, batch_size),
+            "r" | "red" => r_vec = reader.buf[..batch_size].to_vec(),
+            "g" | "green" => g_vec = reader.buf[..batch_size].to_vec(),
+            "b" | "blue" => b_vec = reader.buf[..batch_size].to_vec(),
+            "a" | "alpha" => {}
             other => {
-                let name = if other.chars().last().unwrap().is_ascii_digit() {
-                    // Multidimensional attributes other than position and color are currently unsupported.
-                    unimplemented!();
-                } else {
-                    other
-                };
                 let data = match reader.prop.data_type {
-                    DataType::Uint8 => AttributeData::U8(Vec::with_capacity(batch_size)),
-                    DataType::Uint64 => AttributeData::U64(Vec::with_capacity(batch_size)),
-                    DataType::Int64 => AttributeData::I64(Vec::with_capacity(batch_size)),
-                    DataType::Float32 => AttributeData::F32(Vec::with_capacity(batch_size)),
-                    DataType::Float64 => AttributeData::F64(Vec::with_capacity(batch_size)),
+                    DataType::Uint8 => AttributeData::U8(reader.buf[..batch_size].to_vec()),
+                    DataType::Uint64 => AttributeData::U64(to_vec::<u64>(&reader.buf, batch_size)),
+                    DataType::Int64 => AttributeData::I64(to_vec::<i64>(&reader.buf, batch_size)),
+                    DataType::Float32 => AttributeData::F32(to_vec::<f32>(&reader.buf, batch_size)),
+                    DataType::Float64 => AttributeData::F64(to_vec::<f64>(&reader.buf, batch_size)),
                     DataType::Int8
                     | DataType::Uint16
                     | DataType::Int16
                     | DataType::Uint32
                     | DataType::Int32 => continue,
                 };
-                batch.attributes.insert(name.to_string(), data);
+                attributes.insert(other.to_string(), data);
             }
         }
     }
-    batch
-}
-
-/// Since we can't be sure in which order multidimensional attributes are read,
-/// we push default values and then fill them inside the readers.
-fn push_into_multidimensional_attributes(batch: &mut PointsBatch) {
-    batch.position.push(Vector3::zero());
-    for a in batch.attributes.values_mut() {
-        match a {
-            AttributeData::U8(_)
-            | AttributeData::U64(_)
-            | AttributeData::I64(_)
-            | AttributeData::F32(_)
-            | AttributeData::F64(_) => (),
-            AttributeData::F64Vec3(data) => data.push(Vector3::zero()),
-            AttributeData::U8Vec3(data) => data.push(Vector3::zero()),
-        }
+    let position: Vec<Vector3<f64>> = x_vec
+        .into_iter()
+        .zip(y_vec.into_iter())
+        .zip(z_vec.into_iter())
+        .map(|((x, y), z)| Vector3::new(x, y, z) + offset)
+        .collect();
+    if !r_vec.is_empty() {
+        attributes.insert(
+            "color".to_string(),
+            AttributeData::U8Vec3(
+                r_vec
+                    .into_iter()
+                    .zip(g_vec.into_iter())
+                    .zip(b_vec.into_iter())
+                    .map(|((r, g), b)| Vector3::new(r, g, b))
+                    .collect(),
+            ),
+        );
+    }
+    PointsBatch {
+        position,
+        attributes,
     }
 }
 
@@ -521,13 +494,12 @@ impl Iterator for PlyIterator {
             return None;
         }
 
-        let mut batch = batch_from_readers(&self.readers, self.batch_size);
+        let cur_batch_size = std::cmp::min(
+            self.batch_size,
+            self.num_total_points as usize - self.point_count,
+        );
 
-        while self.point_count < self.num_total_points as usize
-            && batch.position.len() < self.batch_size
-        {
-            push_into_multidimensional_attributes(&mut batch);
-
+        for i in 0..cur_batch_size {
             let mut nread = 0;
 
             // We made sure before that the internal buffer of 'reader' is aligned to the number of
@@ -535,16 +507,16 @@ impl Iterator for PlyIterator {
             // read into it and are sure that it contains at least a full point.
             {
                 let buf = self.reader.fill_buf().unwrap();
-                for r in &self.readers {
+                for r in self.readers.iter_mut() {
                     let cnread = nread;
-                    (r.func)(&mut nread, &buf[cnread..], &mut batch, &r.prop.name);
+                    (r.func)(&mut nread, &buf[cnread..], &mut r.buf, i);
                 }
             }
-            *batch.position.last_mut().unwrap() += self.offset;
             self.reader.consume(nread);
-            self.point_count += 1;
         }
+        self.point_count += cur_batch_size;
 
+        let batch = batch_from_readers(&self.readers, cur_batch_size, &self.offset);
         Some(batch)
     }
 }
