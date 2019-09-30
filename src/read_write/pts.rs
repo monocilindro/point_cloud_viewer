@@ -43,16 +43,8 @@ impl Iterator for PtsIterator {
     type Item = PointsBatch;
 
     fn next(&mut self) -> Option<PointsBatch> {
-        let mut batch = PointsBatch {
-            position: Vec::with_capacity(self.batch_size),
-            attributes: [(
-                "color".to_string(),
-                AttributeData::U8Vec3(Vec::with_capacity(self.batch_size)),
-            )]
-            .iter()
-            .cloned()
-            .collect(),
-        };
+        let mut position = Vec::with_capacity(self.batch_size);
+        let mut color = Vec::with_capacity(self.batch_size);
         let mut point_count = 0;
         let mut line = String::new();
         while point_count < self.batch_size {
@@ -66,25 +58,27 @@ impl Iterator for PtsIterator {
             if parts.len() != 7 {
                 continue;
             }
-            batch.position.push(Vector3::new(
+            position.push(Vector3::new(
                 parts[0].parse::<f64>().unwrap(),
                 parts[1].parse::<f64>().unwrap(),
                 parts[2].parse::<f64>().unwrap(),
             ));
-            batch
-                .get_attribute_vec_mut("color")
-                .unwrap()
-                .push(Vector3::new(
-                    parts[4].parse::<u8>().unwrap(),
-                    parts[5].parse::<u8>().unwrap(),
-                    parts[6].parse::<u8>().unwrap(),
-                ));
+            color.push(Vector3::new(
+                parts[4].parse::<u8>().unwrap(),
+                parts[5].parse::<u8>().unwrap(),
+                parts[6].parse::<u8>().unwrap(),
+            ));
             point_count += 1;
         }
         if point_count == 0 {
             None
         } else {
-            Some(batch)
+            Some(PointsBatch {
+                position,
+                attributes: vec![("color".to_string(), AttributeData::U8Vec3(color))]
+                    .into_iter()
+                    .collect(),
+            })
         }
     }
 }
