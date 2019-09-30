@@ -53,13 +53,11 @@ impl Iterator for Points {
         if self.point_count == self.points.len() {
             return None;
         }
-        let mut position = Vec::with_capacity(NUM_POINTS_PER_BATCH);
-        let mut color = Vec::with_capacity(NUM_POINTS_PER_BATCH);
+        let batch_size = std::cmp::min(NUM_POINTS_PER_BATCH, self.points.len() - self.point_count);
+        let mut position = Vec::with_capacity(batch_size);
+        let mut color = Vec::with_capacity(batch_size);
         let mut intensity = None;
-        let init_count = self.point_count;
-        while self.point_count - init_count < NUM_POINTS_PER_BATCH
-            && self.point_count < self.points.len()
-        {
+        for _ in 0..batch_size {
             let point = &self.points[self.point_count];
             position.push(point.position);
             color.push(Vector3::new(
@@ -69,7 +67,7 @@ impl Iterator for Points {
             ));
             if let Some(i) = point.intensity {
                 if intensity.is_none() {
-                    intensity = Some(Vec::with_capacity(NUM_POINTS_PER_BATCH));
+                    intensity = Some(Vec::with_capacity(batch_size));
                 }
                 intensity.as_mut().unwrap().push(i);
             }
