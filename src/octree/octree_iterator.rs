@@ -1,11 +1,11 @@
 use crate::errors::*;
 use crate::octree::{ChildIndex, DataProvider, NodeId, Octree};
-use crate::read_write::{AttributeReader, BatchIterator, Encoding, RawNodeReader};
+use crate::read_write::{AttributeReader, Encoding, NodeIterator, RawNodeReader};
 use crate::AttributeDataType;
 use std::collections::{HashMap, VecDeque};
 use std::io::BufReader;
 
-impl BatchIterator {
+impl NodeIterator {
     pub fn from_data_provider<Id: ToString>(
         data_provider: &dyn DataProvider,
         encoding: Encoding,
@@ -14,7 +14,7 @@ impl BatchIterator {
         batch_size: usize,
     ) -> Result<Self> {
         if num_points == 0 {
-            return Ok(BatchIterator::default());
+            return Ok(NodeIterator::default());
         }
 
         let mut attributes = HashMap::new();

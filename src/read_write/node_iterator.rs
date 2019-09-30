@@ -17,16 +17,16 @@ use crate::{NumberOfPoints, PointsBatch};
 use num_integer::div_ceil;
 
 /// Streams points from our data provider representation.
-pub struct BatchIterator {
+pub struct NodeIterator {
     reader: Option<RawNodeReader>,
     num_points: usize,
     point_count: usize,
     batch_size: usize,
 }
 
-impl Default for BatchIterator {
+impl Default for NodeIterator {
     fn default() -> Self {
-        BatchIterator {
+        NodeIterator {
             reader: None,
             num_points: 0,
             point_count: 0,
@@ -35,13 +35,13 @@ impl Default for BatchIterator {
     }
 }
 
-impl BatchIterator {
+impl NodeIterator {
     pub fn new(reader: RawNodeReader, num_points: usize, batch_size: usize) -> Self {
         if num_points == 0 {
-            return BatchIterator::default();
+            return NodeIterator::default();
         }
 
-        BatchIterator {
+        NodeIterator {
             reader: Some(reader),
             num_points,
             point_count: 0,
@@ -50,13 +50,13 @@ impl BatchIterator {
     }
 }
 
-impl NumberOfPoints for BatchIterator {
+impl NumberOfPoints for NodeIterator {
     fn num_points(&self) -> Option<usize> {
         Some(self.num_points)
     }
 }
 
-impl Iterator for BatchIterator {
+impl Iterator for NodeIterator {
     type Item = PointsBatch;
 
     fn size_hint(&self) -> (usize, Option<usize>) {

@@ -1,7 +1,7 @@
 use crate::errors::*;
 use crate::math::PointCulling;
 use crate::math::{AllPoints, Frustum, Isometry3, Obb, OrientedBeam};
-use crate::read_write::{BatchIterator, Encoding};
+use crate::read_write::{Encoding, NodeIterator};
 use crate::PointsBatch;
 use cgmath::{Matrix4, Point3};
 use collision::Aabb3;
@@ -45,7 +45,7 @@ impl PointQuery {
 /// Essentially a specialized version of the Filter iterator adapter
 pub struct FilteredIterator {
     pub culling: Box<dyn PointCulling<f64>>,
-    pub batch_iterator: BatchIterator,
+    pub node_iterator: NodeIterator,
 }
 
 impl Iterator for FilteredIterator {
@@ -53,7 +53,7 @@ impl Iterator for FilteredIterator {
 
     fn next(&mut self) -> Option<PointsBatch> {
         let culling = &self.culling;
-        self.batch_iterator.next().map(|mut batch| {
+        self.node_iterator.next().map(|mut batch| {
             let keep: Vec<bool> = batch
                 .position
                 .iter()
@@ -106,11 +106,11 @@ where
         (self.func)(res)
     }
 
-    fn push_points_and_callback<I>(&mut self, batch_iterator: I) -> Result<()>
+    fn push_points_and_callback<I>(&mut self, node_iterator: I) -> Result<()>
     where
         I: Iterator<Item = PointsBatch>,
     {
-        for mut batch in batch_iterator {
+        for mut batch in node_iterator {
             if let Some(local_from_global) = &self.local_from_global {
                 batch.position = batch
                     .position
@@ -225,11 +225,11 @@ where
                             .and_then(Steal::success)
                     }) {
                         // TODO(nnmm): This crashes on error. We should bubble up an error.
-                        let batch_iterator = octree
+                        let node_iterator = octree
                             .points_in_node(&point_location, node_id, batch_size)
                             .expect("Could not read node points");
                         // executing on the available next task if the function still requires it
-                        match point_stream.push_points_and_callback(batch_iterator) {
+                        match point_stream.push_points_and_callback(node_iterator) {
                             Ok(_) => continue,
                             Err(ref e) => {
                                 match e.kind() {

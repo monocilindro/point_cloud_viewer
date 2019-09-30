@@ -19,7 +19,7 @@ use crate::octree::{
 };
 use crate::proto;
 use crate::read_write::{
-    attempt_increasing_rlimit_to_max, make_stream, BatchIterator, Encoding, InputFile, NodeWriter,
+    attempt_increasing_rlimit_to_max, make_stream, Encoding, InputFile, NodeIterator, NodeWriter,
     OpenMode, PositionEncoding, RawNodeWriter,
 };
 use crate::{NumberOfPoints, PointsBatch, NUM_POINTS_PER_BATCH};
@@ -173,7 +173,7 @@ fn split_node<'a, P>(
     for child_id in split_nodes {
         let leaf_nodes_sender_clone = leaf_nodes_sender.clone();
         scope.recurse(move |scope| {
-            let stream = BatchIterator::from_data_provider(
+            let stream = NodeIterator::from_data_provider(
                 octree_data_provider,
                 octree_meta.encoding_for_node(child_id),
                 &child_id,
@@ -214,7 +214,7 @@ fn subsample_children_into(
             Err(Error(ErrorKind::NodeNotFound, _)) => continue,
             Err(err) => return Err(err),
         };
-        let mut batch_iterator = BatchIterator::from_data_provider(
+        let mut node_iterator = NodeIterator::from_data_provider(
             octree_data_provider,
             octree_meta.encoding_for_node(child_id),
             &child_id,
@@ -224,8 +224,8 @@ fn subsample_children_into(
 
         // We read all points into memory, because the new node writer will rewrite this child's
         // file(s).
-        let mut batch = batch_iterator.next().unwrap();
-        batch_iterator.for_each(|mut b| batch.append(&mut b).unwrap());
+        let mut batch = node_iterator.next().unwrap();
+        node_iterator.for_each(|mut b| batch.append(&mut b).unwrap());
         let (keep_parent, keep_child): (Vec<bool>, Vec<bool>) = (0..batch.position.len())
             .map(|i| {
                 let in_parent = i % 8 == 0;

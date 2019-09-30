@@ -14,7 +14,7 @@
 use crate::errors::*;
 use crate::math::Cube;
 use crate::proto;
-use crate::read_write::{BatchIterator, Encoding, PositionEncoding};
+use crate::read_write::{Encoding, NodeIterator, PositionEncoding};
 use crate::CURRENT_VERSION;
 use cgmath::{EuclideanSpace, Matrix4, Point3};
 use collision::{Aabb, Aabb3, Relation};
@@ -355,7 +355,7 @@ impl PointCloud for Octree {
         batch_size: usize,
     ) -> Result<FilteredIterator> {
         let culling = query.get_point_culling();
-        let batch_iterator = BatchIterator::from_data_provider(
+        let node_iterator = NodeIterator::from_data_provider(
             &*self.data_provider,
             self.meta.encoding_for_node(node_id),
             &node_id,
@@ -364,7 +364,7 @@ impl PointCloud for Octree {
         )?;
         Ok(FilteredIterator {
             culling,
-            batch_iterator,
+            node_iterator,
         })
     }
 }
